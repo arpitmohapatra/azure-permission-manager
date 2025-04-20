@@ -1,0 +1,34 @@
+{
+  "policies": [
+    {
+      "org_name": "contoso",
+      "project_name": "Marketing",
+      "entra_group_name": "Marketing Team",
+      "type_of_permission": "contributor"
+    },
+    {
+      "org_name": "contoso",
+      "project_name": "Finance",
+      "entra_group_name": "Finance Admins",
+      "type_of_permission": "projectAdmin"
+    },
+    {
+      "org_name": "contoso",
+      "project_name": "IT",
+      "entra_group_name": "IT Support",
+      "type_of_permission": "reader"
+    },
+    {
+      "org_name": "contoso",
+      "project_name": "Engineering",
+      "entra_group_name": "Build Engineers",
+      "type_of_permission": "buildAdmin"
+    },
+    {
+      "org_name": "contoso",
+      "project_name": "Engineering",
+      "entra_group_name": "Release Managers",
+      "type_of_permission": "releaseAdmin"
+    }
+  ]
+} 
