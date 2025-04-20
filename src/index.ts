@@ -11,8 +11,8 @@ const server = new McpServer({
   description: "MCP server for managing Azure DevOps permissions using Entra groups",
 });
 
-// Initialize Azure DevOps service
-const azureDevOpsService = new AzureDevOpsService();
+// Initialize Azure DevOps service with environment
+const azureDevOpsService = new AzureDevOpsService(process.env as Record<string, string>);
 
 // Add tool to apply a permission policy
 server.tool(

@@ -15,7 +15,17 @@ An [MCP](https://modelcontextprotocol.io/) server for managing Azure DevOps perm
 - Azure account with:
   - Azure DevOps organization
   - Microsoft Entra ID groups
-  - Managed Identity with permissions to read Entra groups and manage Azure DevOps permissions
+  - Azure AD Application with Graph API permissions
+
+## Environment Variables
+
+### Required for Azure DevOps Operations
+- `AZURE_DEVOPS_PAT`: Personal Access Token for Azure DevOps operations
+
+### Required for Entra (Azure AD) Operations
+- `AZURE_CLIENT_ID`: Application (client) ID from Azure AD App Registration
+- `AZURE_CLIENT_SECRET`: Client secret from Azure AD App Registration
+- `AZURE_TENANT_ID`: Azure AD tenant ID
 
 ## Installation
 
@@ -29,19 +39,27 @@ npm install
 
 # Build the TypeScript code
 npm run build
+
+# Set up environment variables
+export AZURE_DEVOPS_PAT="your-pat-token"
+export AZURE_CLIENT_ID="your-client-id"
+export AZURE_CLIENT_SECRET="your-client-secret"
+export AZURE_TENANT_ID="your-tenant-id"
 ```
 
 ## Authentication
 
-This server uses Azure's DefaultAzureCredential which supports several authentication methods:
+The server uses two different authentication methods:
 
-1. Environment variables
-2. Managed Identity
-3. Azure CLI
-4. Visual Studio Code
-5. Interactive browser login
+1. Azure DevOps: Personal Access Token (PAT)
+   - Generate a PAT from Azure DevOps portal
+   - Set it in AZURE_DEVOPS_PAT environment variable
 
-For production use, it's recommended to use Federated Managed Identity.
+2. Entra ID (Azure AD): Client Credentials
+   - Create an App Registration in Azure AD
+   - Grant it "Group.Read.All" Microsoft Graph API permission
+   - Create a client secret
+   - Set the client ID, secret, and tenant ID in environment variables
 
 ## Usage
 

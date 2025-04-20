@@ -1,4 +1,4 @@
-import { DefaultAzureCredential } from "@azure/identity";
+import { DefaultAzureCredential, ClientSecretCredential } from "@azure/identity";
 import { AzureDevOpsGroup, AzureDevOpsPermission, EntraGroup, PermissionPolicy, PermissionType, PermissionTypeMap, ProjectReference } from "./types.js";
 import fetch from "node-fetch";
 
@@ -20,10 +20,36 @@ interface SecurityNamespacesResponse {
 
 export class AzureDevOpsService {
   private credential: DefaultAzureCredential;
+  private graphCredential: ClientSecretCredential | null = null;
   private token: string | null = null;
   
-  constructor() {
+  constructor(private env?: Record<string, string>) {
     this.credential = new DefaultAzureCredential();
+    this.initializeGraphCredential();
+  }
+
+  private getEnvVar(name: string): string | undefined {
+    // Try MCP env first, then process.env
+    return this.env?.[name] || process.env[name];
+  }
+
+  private initializeGraphCredential() {
+    const clientId = this.getEnvVar('AZURE_CLIENT_ID');
+    const clientSecret = this.getEnvVar('AZURE_CLIENT_SECRET');
+    const tenantId = this.getEnvVar('AZURE_TENANT_ID');
+    
+    console.error('Debug - Graph API Credentials:', {
+      hasClientId: !!clientId,
+      hasClientSecret: !!clientSecret,
+      hasTenantId: !!tenantId
+    });
+    
+    if (clientId && clientSecret && tenantId) {
+      this.graphCredential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+      console.error('Debug - Graph API credential initialized successfully');
+    } else {
+      console.error('Debug - Missing required Graph API credentials');
+    }
   }
 
   private async getToken(): Promise<string> {
@@ -35,38 +61,99 @@ export class AzureDevOpsService {
     return this.token;
   }
 
+  private async getGraphToken(): Promise<string> {
+    if (!this.graphCredential) {
+      const clientId = this.getEnvVar('AZURE_CLIENT_ID');
+      const clientSecret = this.getEnvVar('AZURE_CLIENT_SECRET');
+      const tenantId = this.getEnvVar('AZURE_TENANT_ID');
+      
+      console.error('Debug - Graph API Environment Variables:', {
+        hasClientId: !!clientId,
+        clientIdLength: clientId?.length,
+        hasClientSecret: !!clientSecret,
+        clientSecretLength: clientSecret?.length,
+        hasTenantId: !!tenantId,
+        tenantIdLength: tenantId?.length
+      });
+      
+      throw new Error('Graph API credentials not configured. Please set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, and AZURE_TENANT_ID environment variables');
+    }
+    try {
+      console.error('Debug - Getting Graph API token...');
+      const accessToken = await this.graphCredential.getToken("https://graph.microsoft.com/.default");
+      console.error('Debug - Token received, length:', accessToken.token.length);
+      console.error('Debug - Token prefix:', accessToken.token.substring(0, 10) + '...');
+      return accessToken.token;
+    } catch (error) {
+      console.error('Debug - Error getting Graph API token:', error);
+      throw error;
+    }
+  }
+
   private async getAzDevOpsToken(): Promise<string> {
-    // Azure DevOps requires a different scope
-    const accessToken = await this.credential.getToken("499b84ac-1321-427f-aa17-267ca6975798/.default"); // Azure DevOps scope
-    return accessToken.token;
+    const pat = this.getEnvVar('AZURE_DEVOPS_PAT');
+    if (!pat) {
+      throw new Error('AZURE_DEVOPS_PAT environment variable is required');
+    }
+    // Clean up PAT token - remove newlines and whitespace
+    return pat.trim().replace(/[\n\r]/g, '');
+  }
+
+  private createAzDevOpsHeaders(token: string): HeadersInit {
+    // Create headers exactly like the Python script
+    const basicAuth = Buffer.from(`:${token}`, 'utf8').toString('base64');
+    return {
+      'Authorization': `Basic ${basicAuth}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': 'node-fetch'
+    };
+  }
+
+  private createGraphHeaders(token: string): Record<string, string> {
+    return {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
   }
 
   // Fetch Entra group by name
   async getEntraGroupByName(groupName: string): Promise<EntraGroup | null> {
-    const token = await this.getToken();
-    
     try {
-      const response = await fetch(
-        `https://graph.microsoft.com/v1.0/groups?$filter=displayName eq '${groupName}'`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
-      );
+      console.error('Debug - Starting Entra group lookup for:', groupName);
+      const token = await this.getGraphToken();
+      console.error('Debug - Got Graph API token, making request...');
+      
+      const url = `https://graph.microsoft.com/v1.0/groups?$filter=displayName eq '${groupName}'`;
+      console.error('Debug - Request URL:', url);
+      
+      const headers = this.createGraphHeaders(token);
+      console.error('Debug - Request headers:', {
+        'Content-Type': headers['Content-Type'],
+        'Accept': headers['Accept'],
+        'Authorization': headers['Authorization']?.substring(0, 15) + '...' || 'none'
+      });
+      
+      const response = await fetch(url, { headers });
+      console.error('Debug - Response status:', response.status);
+      console.error('Debug - Response headers:', response.headers);
 
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('Debug - Error response body:', errorText);
         throw new Error(`Failed to get Entra group: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
       const data = await response.json() as { value: EntraGroup[] };
+      console.error('Debug - Groups found:', data.value.length);
       
       if (data.value && data.value.length > 0) {
+        console.error('Debug - Found matching group');
         return data.value[0];
       }
       
+      console.error('Debug - No matching group found');
       return null;
     } catch (error) {
       console.error("Error fetching Entra group:", error);
@@ -76,17 +163,13 @@ export class AzureDevOpsService {
 
   // List Azure DevOps projects in an organization
   async listProjects(orgName: string): Promise<ProjectReference[]> {
-    const token = await this.getAzDevOpsToken();
-    
     try {
+      const token = await this.getAzDevOpsToken();
+      const headers = this.createAzDevOpsHeaders(token);
+      
       const response = await fetch(
-        `https://dev.azure.com/${orgName}/_apis/projects?api-version=7.2`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        }
+        `https://dev.azure.com/${orgName}/_apis/projects?api-version=7.0-preview.1`,
+        { headers }
       );
 
       if (!response.ok) {
@@ -113,30 +196,25 @@ export class AzureDevOpsService {
     const token = await this.getAzDevOpsToken();
     
     try {
+      // Updated implementation with displayName only
       const response = await fetch(
-        `https://vssps.dev.azure.com/${orgName}/_apis/graph/groups?api-version=7.2-preview.1`,
+        `https://vssps.dev.azure.com/${orgName}/_apis/graph/groups?api-version=7.0-preview.1`,
         {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
+          headers: this.createAzDevOpsHeaders(token),
           body: JSON.stringify({
-            originId: entraGroupId,
-            displayName: `EntraGroup_${entraGroupId.substring(0, 8)}`, // Simplified display name
-            description: "Added via MCP Permission Manager",
-            origin: "aad" // Azure Active Directory (Entra ID)
+            displayName: "mcptest"
           })
         }
       );
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to add Entra group to Azure DevOps: ${response.status} ${response.statusText} - ${errorText}`);
+        console.error('Debug - Error response:', errorText);
+        throw new Error(`Failed to add Entra group: ${response.status} ${response.statusText} - ${errorText}`);
       }
 
-      const group = await response.json() as AzureDevOpsGroup & { descriptor: string };
-      return group;
+      return await response.json() as AzureDevOpsGroup & { descriptor: string };
     } catch (error) {
       console.error("Error adding Entra group to Azure DevOps:", error);
       throw error;
@@ -156,17 +234,15 @@ export class AzureDevOpsService {
     try {
       // First, we need to get the project security namespace
       const securityNamespaceResponse = await fetch(
-        `https://dev.azure.com/${orgName}/_apis/securitynamespaces?api-version=7.2`,
+        `https://dev.azure.com/${orgName}/_apis/securitynamespaces?api-version=7.0-preview.1`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+          headers: this.createAzDevOpsHeaders(token)
         }
       );
 
       if (!securityNamespaceResponse.ok) {
-        throw new Error(`Failed to get security namespaces: ${securityNamespaceResponse.status}`);
+        const errorText = await securityNamespaceResponse.text();
+        throw new Error(`Failed to get security namespaces: ${securityNamespaceResponse.status} - ${errorText}`);
       }
 
       const securityNamespaces = await securityNamespaceResponse.json() as SecurityNamespacesResponse;
@@ -178,28 +254,21 @@ export class AzureDevOpsService {
 
       // Now we apply the permission
       const response = await fetch(
-        `https://dev.azure.com/${orgName}/_apis/accesscontrollists/${projectNamespace.namespaceId}?api-version=7.2`,
+        `https://dev.azure.com/${orgName}/_apis/accesscontrollists/${projectNamespace.namespaceId}?api-version=7.0-preview.1`,
         {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
+          headers: this.createAzDevOpsHeaders(token),
           body: JSON.stringify({
-            token: `$PROJECT:${projectId}`,
-            accessControlEntries: [
-              {
-                descriptor: groupDescriptor,
-                allow: 31, // Numeric value representing permission level, varies by namespace and permission type
-                deny: 0,
-                extendedInfo: {
-                  effectiveAllow: 31,
-                  effectiveDeny: 0,
-                  inheritedAllow: 0,
-                  inheritedDeny: 0
+            value: [{
+              token: `$PROJECT:${projectId}`,
+              acesDictionary: {
+                [groupDescriptor]: {
+                  descriptor: groupDescriptor,
+                  allow: 31,
+                  deny: 0
                 }
               }
-            ]
+            }]
           })
         }
       );
