@@ -181,6 +181,172 @@ To use federated managed identity:
    - `AZURE_CLIENT_ID`: The client ID of your managed identity
    - `AZURE_TENANT_ID`: Your Azure tenant ID
 
+## MCP Configuration
+
+To use this server with MCP, add the following configuration to your MCP client:
+
+```json
+{
+  "name": "Azure DevOps Permission Manager",
+  "version": "1.0.0",
+  "description": "MCP server for managing Azure DevOps permissions using Entra groups",
+  "tools": {
+    "applyPermissionPolicy": {
+      "description": "Apply a permission policy to a project for an Entra group",
+      "parameters": {
+        "org_name": "string",
+        "project_name": "string",
+        "entra_group_name": "string",
+        "type_of_permission": "enum(reader,contributor,projectAdmin,buildAdmin,releaseAdmin,custom)"
+      }
+    },
+    "listProjects": {
+      "description": "List all projects in an Azure DevOps organization",
+      "parameters": {
+        "org_name": "string"
+      }
+    },
+    "lookupEntraGroup": {
+      "description": "Look up an Entra group by name",
+      "parameters": {
+        "group_name": "string"
+      }
+    },
+    "bulkApplyPermissions": {
+      "description": "Apply multiple permission policies in one call",
+      "parameters": {
+        "policies": "array"
+      }
+    }
+  }
+}
+```
+
+### Example MCP Tool Calls
+
+#### Apply Single Permission
+```typescript
+await mcp.call("applyPermissionPolicy", {
+  org_name: "aalcloud",
+  project_name: "mcptest",
+  entra_group_name: "mcptest",
+  type_of_permission: "contributor"
+});
+```
+
+#### List Projects
+```typescript
+const projects = await mcp.call("listProjects", {
+  org_name: "aalcloud"
+});
+```
+
+#### Lookup Entra Group
+```typescript
+const group = await mcp.call("lookupEntraGroup", {
+  group_name: "mcptest"
+});
+```
+
+#### Bulk Apply Permissions
+```typescript
+await mcp.call("bulkApplyPermissions", {
+  policies: [
+    {
+      org_name: "aalcloud",
+      project_name: "mcptest",
+      entra_group_name: "mcptest",
+      type_of_permission: "reader"
+    },
+    {
+      org_name: "aalcloud",
+      project_name: "mcptest",
+      entra_group_name: "mcptest",
+      type_of_permission: "buildAdmin"
+    }
+  ]
+});
+```
+
+### Common Permission Scenarios
+
+1. **Development Team Setup**
+```typescript
+await mcp.call("bulkApplyPermissions", {
+  policies: [
+    {
+      org_name: "aalcloud",
+      project_name: "project1",
+      entra_group_name: "Developers",
+      type_of_permission: "contributor"
+    },
+    {
+      org_name: "aalcloud",
+      project_name: "project1",
+      entra_group_name: "DevOps",
+      type_of_permission: "buildAdmin"
+    },
+    {
+      org_name: "aalcloud",
+      project_name: "project1",
+      entra_group_name: "ReleaseManagers",
+      type_of_permission: "releaseAdmin"
+    }
+  ]
+});
+```
+
+2. **Project Management Setup**
+```typescript
+await mcp.call("bulkApplyPermissions", {
+  policies: [
+    {
+      org_name: "aalcloud",
+      project_name: "project1",
+      entra_group_name: "ProjectManagers",
+      type_of_permission: "projectAdmin"
+    },
+    {
+      org_name: "aalcloud",
+      project_name: "project1",
+      entra_group_name: "Stakeholders",
+      type_of_permission: "reader"
+    }
+  ]
+});
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Authentication Failures**
+   - Verify your PAT token has the required scopes
+   - Check if your Azure AD app has the necessary Graph API permissions
+   - Ensure all environment variables are set correctly
+
+2. **Permission Application Failures**
+   - Verify the Entra group exists using the `lookupEntraGroup` tool
+   - Check if the project exists using the `listProjects` tool
+   - Ensure the PAT token has sufficient permissions
+
+3. **Bulk Operation Issues**
+   - Validate the JSON format of your policies
+   - Check for typos in organization, project, or group names
+   - Verify all referenced groups and projects exist
+
+### Logging
+
+The server provides detailed logging for troubleshooting:
+- Authentication and token acquisition
+- API requests and responses
+- Permission application status
+
+Enable debug logging by setting:
+```bash
+export DEBUG=azure-devops-permission-manager:*
+```
+
 ## License
 
 MIT 
